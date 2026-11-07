@@ -2,6 +2,8 @@
 
 Archive of Roblox `WebClientApp` (wasm browser client) builds, one release per version: `webclient-version-<hash>`.
 
+Builds tend to disappear from the Roblox CDN after a while (for example `version-f4a4dba57f874ad0` now returns 403 for everything), so each new version is saved here while it's still available.
+
 Each release contains:
 
 - `version-<hash>-<UTC timestamp>.zip`: the build, laid out like `https://setup.rbxcdn.com/webclient/<version>-RobloxWebClient/`, plus `WebClient.metadata.json` and `download-report.json`.
