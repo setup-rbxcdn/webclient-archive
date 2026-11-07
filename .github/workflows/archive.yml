@@ -1,0 +1,78 @@
+name: Archive WebClientApp
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "version-hash to archive (default: current live version)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+concurrency:
+  group: archive
+  cancel-in-progress: false
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          HASH="${INPUT_VERSION#version-}"
+          NUMBER=""
+          if [ -z "$HASH" ]; then
+            JSON=$(curl -fsS https://clientsettingscdn.roblox.com/v2/client-version/WebClientApp)
+            HASH=$(jq -r '.clientVersionUpload | sub("^version-"; "")' <<<"$JSON")
+            NUMBER=$(jq -r '.version' <<<"$JSON")
+          fi
+          if ! [[ "$HASH" =~ ^[0-9a-f]{16}$ ]]; then
+            echo "Invalid version hash: $HASH" >&2
+            exit 1
+          fi
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          if gh release view "webclient-version-$HASH" >/dev/null 2>&1; then
+            echo "webclient-version-$HASH already archived"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.v.outputs.exists != 'true'
+        with:
+          node-version: "20.x"
+
+      - name: Download
+        if: steps.v.outputs.exists != 'true'
+        run: |
+          git clone --depth 1 https://github.com/setup-rbxcdn/roblox-rdd-downloader.git "$RUNNER_TEMP/rdd"
+          npm ci --prefix "$RUNNER_TEMP/rdd"
+          node "$RUNNER_TEMP/rdd/rdd-download.mjs" \
+            --binaryType WebClientApp \
+            --version "${{ steps.v.outputs.hash }}" \
+            --out "version-${{ steps.v.outputs.hash }}"
+
+      - name: Publish release
+        if: steps.v.outputs.exists != 'true'
+        run: |
+          HASH="${{ steps.v.outputs.hash }}"
+          NUMBER="${{ steps.v.outputs.number }}"
+          DIR="version-$HASH"
+          STAMP=$(date -u +%Y-%m-%dT%H%M%S)
+          ZIP="$DIR-$STAMP.zip"
+          STATUS=$(jq -r .status "$DIR/download-report.json")
+          FAILED=$(jq '.failures | length' "$DIR/download-report.json")
+
+          zip -qr "$ZIP" "$DIR"
+
+          NOTES="Archive of \`$DIR\`${NUMBER:+ ($NUMBER)}, fetched $(date -u +%Y-%m-%dT%H:%M:%SZ).
+          Status: $STATUS ($FAILED file(s) failed, see download-report.json)."
+
+          gh release create "webclient-version-$HASH" "$ZIP" "$DIR/download-report.json" \
+            --title "webclient-version-$HASH" \
+            --notes "$NOTES"
