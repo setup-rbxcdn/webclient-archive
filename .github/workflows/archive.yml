@@ -51,7 +51,7 @@ jobs:
         if: steps.v.outputs.exists != 'true'
         run: |
           git clone --depth 1 https://github.com/setup-rbxcdn/roblox-rdd-downloader.git "$RUNNER_TEMP/rdd"
-          npm ci --prefix "$RUNNER_TEMP/rdd"
+          npm install --omit=dev --no-audit --no-fund --prefix "$RUNNER_TEMP/rdd"
           node "$RUNNER_TEMP/rdd/rdd-download.mjs" \
             --binaryType WebClientApp \
             --version "${{ steps.v.outputs.hash }}" \
