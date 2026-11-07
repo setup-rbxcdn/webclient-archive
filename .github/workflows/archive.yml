@@ -37,7 +37,7 @@ jobs:
           fi
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
-          if gh release view "webclient-version-$HASH" >/dev/null 2>&1; then
+          if gh release view "webclient-version-$HASH" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "webclient-version-$HASH already archived"
             echo "exists=true" >> "$GITHUB_OUTPUT"
           fi
@@ -74,5 +74,6 @@ jobs:
           Status: $STATUS ($FAILED file(s) failed, see download-report.json)."
 
           gh release create "webclient-version-$HASH" "$ZIP" "$DIR/download-report.json" \
+            -R "$GITHUB_REPOSITORY" \
             --title "webclient-version-$HASH" \
             --notes "$NOTES"
