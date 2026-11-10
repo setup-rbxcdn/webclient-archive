@@ -8,37 +8,63 @@ on:
         description: "version-hash to archive (default: current live version)"
         required: false
         default: ""
+      migrate_releases:
+        description: "Recreate every release in Roblox release-date order"
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: write
 concurrency:
   group: archive
   cancel-in-progress: false
 jobs:
-  archive:
+  migrate:
+    if: inputs.migrate_releases == true
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Recreate releases
+        run: python .github/scripts/releases.py migrate
+
+  archive:
+    if: inputs.migrate_releases != true
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Resolve version
         id: v
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           HASH="${INPUT_VERSION#version-}"
-          NUMBER=""
+          HISTORY=$(curl -fsS https://raw.githubusercontent.com/setup-rbxcdn/setup-rbxcdn.github.io/main/version-history-inverted/Web/WebClientApp.json)
+          DATES=$(curl -fsS https://raw.githubusercontent.com/setup-rbxcdn/setup-rbxcdn.github.io/main/hash-metadata.json)
           if [ -z "$HASH" ]; then
             JSON=$(curl -fsS https://clientsettingscdn.roblox.com/v2/client-version/WebClientApp)
             HASH=$(jq -r '.clientVersionUpload | sub("^version-"; "")' <<<"$JSON")
-            NUMBER=$(jq -r '.version' <<<"$JSON")
           fi
           if ! [[ "$HASH" =~ ^[0-9a-f]{16}$ ]]; then
             echo "Invalid version hash: $HASH" >&2
             exit 1
           fi
+          VERSION="version-$HASH"
+          NUMBER=$(jq -r --arg v "$VERSION" '.[$v] // empty' <<<"$HISTORY")
+          RELEASE_DATE=$(jq -r --arg v "$VERSION" '.Web.WebClientApp[$v] // empty' <<<"$DATES")
+          if [ -z "$NUMBER" ] || [ -z "$RELEASE_DATE" ]; then
+            echo "$VERSION is missing from setup-rbxcdn version history" >&2
+            exit 1
+          fi
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
-          if gh release view "webclient-version-$HASH" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "webclient-version-$HASH already archived"
+          echo "release_date=$RELEASE_DATE" >> "$GITHUB_OUTPUT"
+          if gh release view "webclient-$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$VERSION already archived"
             echo "exists=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -57,23 +83,21 @@ jobs:
             --version "${{ steps.v.outputs.hash }}" \
             --out "version-${{ steps.v.outputs.hash }}"
 
+      - name: Build release assets
+        if: steps.v.outputs.exists != 'true'
+        env:
+          HASH: ${{ steps.v.outputs.hash }}
+          ENGINE_VERSION: ${{ steps.v.outputs.number }}
+          RELEASE_DATE: ${{ steps.v.outputs.release_date }}
+        run: python .github/scripts/releases.py build
+
       - name: Publish release
         if: steps.v.outputs.exists != 'true'
+        env:
+          HASH: ${{ steps.v.outputs.hash }}
+          ENGINE_VERSION: ${{ steps.v.outputs.number }}
         run: |
-          HASH="${{ steps.v.outputs.hash }}"
-          NUMBER="${{ steps.v.outputs.number }}"
-          DIR="version-$HASH"
-          STAMP=$(date -u +%Y-%m-%dT%H%M%S)
-          ZIP="$DIR-$STAMP.zip"
-          STATUS=$(jq -r .status "$DIR/download-report.json")
-          FAILED=$(jq '.failures | length' "$DIR/download-report.json")
-
-          zip -qr "$ZIP" "$DIR"
-
-          NOTES="Archive of \`$DIR\`${NUMBER:+ ($NUMBER)}, fetched $(date -u +%Y-%m-%dT%H:%M:%SZ).
-          Status: $STATUS ($FAILED file(s) failed, see download-report.json)."
-
-          gh release create "webclient-version-$HASH" "$ZIP" "$DIR/download-report.json" \
+          gh release create "webclient-version-$HASH" "version-$HASH.zip" metadata-diff.json download-report.json \
             -R "$GITHUB_REPOSITORY" \
-            --title "webclient-version-$HASH" \
-            --notes "$NOTES"
+            --title "$ENGINE_VERSION version-$HASH" \
+            --notes-file release-notes.md
