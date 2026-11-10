@@ -8,29 +8,13 @@ on:
         description: "version-hash to archive (default: current live version)"
         required: false
         default: ""
-      migrate_releases:
-        description: "Recreate every release in Roblox release-date order"
-        type: boolean
-        required: false
-        default: false
 permissions:
   contents: write
 concurrency:
   group: archive
   cancel-in-progress: false
 jobs:
-  migrate:
-    if: inputs.migrate_releases == true
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Recreate releases
-        run: python .github/scripts/releases.py migrate
-
   archive:
-    if: inputs.migrate_releases != true
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}

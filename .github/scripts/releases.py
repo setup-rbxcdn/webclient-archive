@@ -3,7 +3,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import urllib.request
 import zipfile
@@ -11,7 +10,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "setup-rbxcdn/webclient-archive")
-HISTORY_URL = "https://raw.githubusercontent.com/setup-rbxcdn/setup-rbxcdn.github.io/main/version-history-inverted/Web/WebClientApp.json"
 DATES_URL = "https://raw.githubusercontent.com/setup-rbxcdn/setup-rbxcdn.github.io/main/hash-metadata.json"
 
 
@@ -32,14 +30,6 @@ def metadata_from_zip(path, version):
         name = wanted if wanted in names else next((n for n in names if n.endswith("/WebClient.metadata.json")), None)
         if not name:
             raise RuntimeError(f"{path} has no WebClient.metadata.json")
-        return json.loads(archive.read(name))
-
-
-def report_from_zip(path):
-    with zipfile.ZipFile(path) as archive:
-        name = next((n for n in archive.namelist() if n.endswith("/download-report.json")), None)
-        if not name:
-            raise RuntimeError(f"{path} has no download-report.json")
         return json.loads(archive.read(name))
 
 
@@ -121,62 +111,5 @@ def build():
     shutil.make_archive(version, "zip", root_dir=".", base_dir=version)
 
 
-def migrate():
-    checkout = str(Path.cwd())
-    history = fetch_json(HISTORY_URL)
-    dates = fetch_json(DATES_URL)["Web"]["WebClientApp"]
-    releases = json.loads(run("gh", "api", f"repos/{REPO}/releases?per_page=100", capture=True))
-    by_version = {r["tag_name"].removeprefix("webclient-"): r for r in releases}
-    versions = sorted(by_version, key=dates.get)
-    with tempfile.TemporaryDirectory() as temp_name:
-        temp = Path(temp_name)
-        records = []
-        previous_metadata = []
-        previous_version = None
-        parent = run("git", "rev-parse", "HEAD", capture=True).strip()
-        tree = run("git", "rev-parse", "HEAD^{tree}", capture=True).strip()
-        for version in versions:
-            release = by_version[version]
-            folder = temp / version
-            folder.mkdir()
-            run("gh", "release", "download", release["tag_name"], "-R", REPO, "--dir", str(folder))
-            zip_path = next(folder.glob("*.zip"))
-            metadata = metadata_from_zip(zip_path, version)
-            original = report_from_zip(zip_path)
-            diff = make_diff(previous_metadata, metadata, previous_version, version)
-            source = "Synthle/RobloxWasmClientArchive" if version == "version-f4a4dba57f874ad0" else "Roblox CDN"
-            report = make_report(original, version, history[version], dates[version], release["published_at"], source)
-            commit_env = os.environ.copy()
-            commit_env.update({
-                "GIT_AUTHOR_NAME": "github-actions[bot]",
-                "GIT_AUTHOR_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
-                "GIT_COMMITTER_NAME": "github-actions[bot]",
-                "GIT_COMMITTER_EMAIL": "41898282+github-actions[bot]@users.noreply.github.com",
-                "GIT_AUTHOR_DATE": dates[version],
-                "GIT_COMMITTER_DATE": dates[version],
-            })
-            commit = subprocess.run(
-                ["git", "commit-tree", tree, "-p", parent, "-m", f"Archive {version}"],
-                check=True, text=True, capture_output=True, env=commit_env,
-            ).stdout.strip()
-            records.append((version, folder, zip_path, diff, report, release["tag_name"], commit))
-            previous_metadata, previous_version = metadata, version
-            parent = commit
-
-        # Make dated release commits visible to GitHub before release creation.
-        run("git", "-C", checkout, "push", "origin", f"{parent}:refs/heads/release-migration")
-
-        # All assets are now local and readable. Only now remove old releases/tags.
-        for _, _, _, _, _, tag, _ in records:
-            run("gh", "release", "delete", tag, "-R", REPO, "--cleanup-tag", "--yes")
-
-        for version, folder, zip_path, diff, report, tag, commit in records:
-            os.chdir(folder)
-            write_release_files(diff, report)
-            run("gh", "release", "create", tag, str(zip_path), "metadata-diff.json", "download-report.json",
-                "-R", REPO, "--target", commit, "--title", f"{report['engineVersion']} {version}", "--notes-file", "release-notes.md")
-        run("git", "-C", checkout, "push", "origin", "--delete", "release-migration")
-
-
 if __name__ == "__main__":
-    {"build": build, "migrate": migrate}[sys.argv[1]]()
+    build()
