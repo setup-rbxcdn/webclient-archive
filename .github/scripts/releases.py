@@ -55,9 +55,10 @@ def make_diff(previous, current, previous_version, version):
 
 def make_report(original, version, engine, release_date, archived_at, source):
     failures = original.get("failures", [])
-    total = original.get("manifestAndBootstrapFiles", original.get("metadataFiles", 0))
+    existing_files = original.get("files", {})
+    total = original.get("manifestAndBootstrapFiles", original.get("metadataFiles", existing_files.get("listed", 0)))
     failed = len(failures)
-    available = original.get("downloadedOrCached", total - failed)
+    available = original.get("downloadedOrCached", existing_files.get("available", total - failed))
     return {
         "version": version,
         "engineVersion": engine,
