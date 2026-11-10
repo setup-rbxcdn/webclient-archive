@@ -35,6 +35,14 @@ def metadata_from_zip(path, version):
         return json.loads(archive.read(name))
 
 
+def report_from_zip(path):
+    with zipfile.ZipFile(path) as archive:
+        name = next((n for n in archive.namelist() if n.endswith("/download-report.json")), None)
+        if not name:
+            raise RuntimeError(f"{path} has no download-report.json")
+        return json.loads(archive.read(name))
+
+
 def keyed(metadata):
     return {entry["path"]: entry for entry in metadata}
 
@@ -134,8 +142,7 @@ def migrate():
             run("gh", "release", "download", release["tag_name"], "-R", REPO, "--dir", str(folder))
             zip_path = next(folder.glob("*.zip"))
             metadata = metadata_from_zip(zip_path, version)
-            report_path = folder / "download-report.json"
-            original = json.loads(report_path.read_text(encoding="utf-8"))
+            original = report_from_zip(zip_path)
             diff = make_diff(previous_metadata, metadata, previous_version, version)
             source = "Synthle/RobloxWasmClientArchive" if version == "version-f4a4dba57f874ad0" else "Roblox CDN"
             report = make_report(original, version, history[version], dates[version], release["published_at"], source)
