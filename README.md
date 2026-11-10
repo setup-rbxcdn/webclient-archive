@@ -6,7 +6,7 @@ Builds tend to disappear from the Roblox CDN after a while (for example `version
 
 Each release contains:
 
-- `version-<hash>.zip`: build laid out like `https://setup.rbxcdn.com/webclient/<version>-RobloxWebClient/`, plus `WebClient.metadata.json` and `download-report.json`.
+- `<engine-version>-version-<hash>-<UTC timestamp>.zip`: build laid out like `https://setup.rbxcdn.com/webclient/<version>-RobloxWebClient/`, plus `WebClient.metadata.json` and `download-report.json`.
 - `metadata-diff.json`: added, removed, and changed metadata entries compared with previous release.
 - `download-report.json`: version, release/archive dates, source, file counts, status, and failures.
 

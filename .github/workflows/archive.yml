@@ -8,13 +8,29 @@ on:
         description: "version-hash to archive (default: current live version)"
         required: false
         default: ""
+      rename_release_zips:
+        description: "One-time recreation with engine-prefixed ZIP names"
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: write
 concurrency:
   group: archive
   cancel-in-progress: false
 jobs:
+  rename-release-zips:
+    if: inputs.rename_release_zips == true
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recreate releases
+        run: python .github/scripts/rename_release_zips.py
+
   archive:
+    if: inputs.rename_release_zips != true
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -81,7 +97,10 @@ jobs:
           HASH: ${{ steps.v.outputs.hash }}
           ENGINE_VERSION: ${{ steps.v.outputs.number }}
         run: |
-          gh release create "webclient-version-$HASH" "version-$HASH.zip" metadata-diff.json download-report.json \
+          STAMP=$(date -u +%Y-%m-%dT%H%M%S)
+          ZIP="$ENGINE_VERSION-version-$HASH-$STAMP.zip"
+          mv "version-$HASH.zip" "$ZIP"
+          gh release create "webclient-version-$HASH" "$ZIP" metadata-diff.json download-report.json \
             -R "$GITHUB_REPOSITORY" \
             --title "$ENGINE_VERSION version-$HASH" \
             --notes-file release-notes.md
