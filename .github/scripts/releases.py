@@ -11,11 +11,39 @@ from pathlib import Path
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "setup-rbxcdn/webclient-archive")
 DATES_URL = "https://raw.githubusercontent.com/setup-rbxcdn/setup-rbxcdn.github.io/main/hash-metadata.json"
+CLIENT_VERSION_URL = "https://clientsettings.roblox.com/v2/client-version/WebClientApp"
+APPLICATION_SETTINGS_URL = "https://clientsettingscdn.roblox.com/v2/settings/application/WebClientApp"
 
 
 def fetch_json(url):
     with urllib.request.urlopen(url) as response:
         return json.load(response)
+
+
+def capture_client_settings(directory, version):
+    output = directory / "client-settings"
+    output.mkdir()
+    fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    status = {
+        "versionEndpoint": CLIENT_VERSION_URL,
+        "applicationSettingsEndpoint": APPLICATION_SETTINGS_URL,
+        "fetchedAt": fetched_at,
+        "versionMatchesArchive": None,
+        "clientVersionError": None,
+        "applicationSettingsError": None,
+    }
+    for name, url, error_key in (
+        ("client-version.json", CLIENT_VERSION_URL, "clientVersionError"),
+        ("application-WebClientApp.json", APPLICATION_SETTINGS_URL, "applicationSettingsError"),
+    ):
+        try:
+            data = fetch_json(url)
+            (output / name).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            if name == "client-version.json":
+                status["versionMatchesArchive"] = data.get("clientVersionUpload") == version
+        except Exception as error:
+            status[error_key] = str(error)
+    (output / "status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
 
 
 def run(*args, capture=False):
@@ -106,8 +134,10 @@ def build():
     current = json.loads((directory / "WebClient.metadata.json").read_text(encoding="utf-8"))
     diff = make_diff(previous, current, previous_version, version)
     report = make_report(original, version, engine, release_date, archived_at, "Roblox CDN")
+    capture_client_settings(directory, version)
     write_release_files(diff, report)
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (directory / "release-notes.md").unlink(missing_ok=True)
     shutil.make_archive(version, "zip", root_dir=".", base_dir=version)
 
 
