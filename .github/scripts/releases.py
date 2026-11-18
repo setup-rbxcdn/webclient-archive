@@ -51,14 +51,56 @@ def run(*args, capture=False):
     return result.stdout if capture else None
 
 
+def parse_fsindex(data):
+    header = b"rbxfsindex 1\n"
+    if not data.startswith(header):
+        raise RuntimeError("WebClient.fsindex.txt: unsupported header")
+    entries = []
+    prev = b""
+    pos = len(header)
+    while pos < len(data):
+        t1 = data.find(b"\t", pos)
+        t2 = data.find(b"\t", t1 + 1) if t1 >= 0 else -1
+        nl = data.find(b"\n", t2 + 1) if t2 >= 0 else -1
+        if t1 < 0 or t2 < 0 or nl < 0:
+            raise RuntimeError("WebClient.fsindex.txt: truncated line")
+        prefix_bytes = data[pos:t1]
+        suffix = data[t1 + 1:t2]
+        size_bytes = data[t2 + 1:nl]
+        if not prefix_bytes.isdigit() or not size_bytes.isdigit():
+            raise RuntimeError("WebClient.fsindex.txt: malformed line")
+        prefix_len = int(prefix_bytes)
+        if prefix_len > len(prev):
+            raise RuntimeError("WebClient.fsindex.txt: malformed line")
+        full = prev[:prefix_len] + suffix
+        entries.append({"path": full.decode("utf-8"), "size": int(size_bytes)})
+        prev = full
+        pos = nl + 1
+    return entries
+
+
 def metadata_from_zip(path, version):
-    wanted = f"{version}/WebClient.metadata.json"
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
-        name = wanted if wanted in names else next((n for n in names if n.endswith("/WebClient.metadata.json")), None)
-        if not name:
-            raise RuntimeError(f"{path} has no WebClient.metadata.json")
-        return json.loads(archive.read(name))
+        for filename, loader in (
+            ("WebClient.fsindex.txt", parse_fsindex),
+            ("WebClient.metadata.json", lambda b: json.loads(b.decode("utf-8"))),
+        ):
+            wanted = f"{version}/{filename}"
+            name = wanted if wanted in names else next((n for n in names if n.endswith(f"/{filename}")), None)
+            if name:
+                return loader(archive.read(name))
+        raise RuntimeError(f"{path} has no WebClient.fsindex.txt or WebClient.metadata.json")
+
+
+def metadata_from_dir(directory):
+    fsindex = directory / "WebClient.fsindex.txt"
+    if fsindex.is_file():
+        return parse_fsindex(fsindex.read_bytes())
+    metadata = directory / "WebClient.metadata.json"
+    if metadata.is_file():
+        return json.loads(metadata.read_text(encoding="utf-8"))
+    raise RuntimeError(f"{directory} has no WebClient.fsindex.txt or WebClient.metadata.json")
 
 
 def keyed(metadata):
@@ -131,7 +173,7 @@ def build():
         with tempfile.TemporaryDirectory() as temp:
             run("gh", "release", "download", f"webclient-{previous_version}", "-R", REPO, "--pattern", "*.zip", "--dir", temp)
             previous = metadata_from_zip(next(Path(temp).glob("*.zip")), previous_version)
-    current = json.loads((directory / "WebClient.metadata.json").read_text(encoding="utf-8"))
+    current = metadata_from_dir(directory)
     diff = make_diff(previous, current, previous_version, version)
     report = make_report(original, version, engine, release_date, archived_at, "Roblox CDN")
     capture_client_settings(directory, version)
